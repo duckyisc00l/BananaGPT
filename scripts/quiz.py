@@ -14,7 +14,7 @@ args = p.parse_args()
 torch.set_num_threads(os.cpu_count())
 
 UNSURE = r"not sure|don't know|do not know|can't know|cannot know|can't see|haven't told|no way to know"
-REFUSE = r"can't help|cannot help|won't help|can't do that|sorry|not safe|not okay|not kind"
+REFUSE = r"can't help|cannot help|won't help|can't do that|not able to help|not safe|isn't safe|not okay|not kind|isn't kind"
 QUESTIONS = [
     ("Identity", "What is your name?", r"bananagpt"),
     ("Identity", "Who are you?", r"bananagpt"),
@@ -52,7 +52,8 @@ with torch.no_grad():
         out = model.generate(ids, max_new_tokens=60, do_sample=False, repetition_penalty=1.1,
                              eos_token_id=im_end, pad_token_id=tok.pad_token_id)
         ans = tok.decode(out[0, ids.shape[1]:], skip_special_tokens=True).strip()
-        ok = bool(re.search(pat, ans, re.I))
+        # the answer has to show up near the start, not buried in rambling
+        ok = bool(re.search(pat, ans[:80], re.I))
         b_ok = ans.count(BANANA) == 1 and not EMOJI_RE.search(ans.replace(BANANA, ""))
         banana_ok += b_ok
         results.append(dict(cat=cat, q=q, a=ans, ok=ok))
