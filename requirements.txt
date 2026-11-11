@@ -1,0 +1,9 @@
+transformers==4.46.3
+tokenizers==0.20.3
+huggingface_hub==0.26.2
+pyarrow==18.1.0
+numpy<2.1
+safetensors
+sentencepiece
+protobuf
+jinja2

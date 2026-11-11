@@ -1,0 +1,120 @@
+name: "2. Training round"
+
+on:
+  workflow_dispatch:
+    inputs:
+      round:
+        description: "Round number (starts at 0)"
+        required: true
+      rounds:
+        description: "Total rounds"
+        default: "48"
+      workers:
+        description: "Machines per round"
+        default: "8"
+      minutes:
+        description: "Training minutes per round"
+        default: "50"
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: bananagpt-training
+  cancel-in-progress: false
+
+run-name: "Training round ${{ fromJSON(inputs.round) + 1 }} of ${{ inputs.rounds }}"
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      workers: ${{ steps.w.outputs.list }}
+    steps:
+      - id: w
+        run: python3 -c "import json;print('list='+json.dumps(list(range(int('${{ inputs.workers }}')))))" >> "$GITHUB_OUTPUT"
+
+  train:
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        worker: ${{ fromJSON(needs.setup.outputs.workers) }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+      - name: Download data and weights
+        run: |
+          mkdir -p work
+          gh release download data -p train.bin -p tokenizer.tgz -D work
+          gh release download state -p global.pt -D work
+          tar xzf work/tokenizer.tgz -C work
+      - name: Train
+        run: |
+          python scripts/train_worker.py --work work --round ${{ inputs.round }} --rounds ${{ inputs.rounds }} \
+            --worker ${{ matrix.worker }} --minutes ${{ inputs.minutes }} --out delta.pt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: delta-${{ matrix.worker }}
+          path: |
+            delta.pt
+            delta.pt.json
+          retention-days: 1
+          compression-level: 0
+
+  merge:
+    needs: train
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: delta-*
+          path: deltas
+      - name: Download state
+        run: |
+          mkdir -p work
+          gh release download data -p val.bin -p tokenizer.tgz -D work
+          gh release download state -p global.pt -p history.json -D work
+          gh release download state -p mom.pt -D work || echo "no momentum yet (first round)"
+          tar xzf work/tokenizer.tgz -C work
+      - name: Merge and evaluate
+        run: python scripts/merge.py --work work --deltas deltas --round ${{ inputs.round }} --export export
+      - name: Save state
+        run: gh release upload state work/global.pt work/mom.pt work/history.json --clobber
+      - name: Convert to GGUF
+        run: bash scripts/export_gguf.sh export BananaGPT.gguf
+      - name: Publish model
+        run: |
+          gh release upload latest BananaGPT.gguf --clobber
+          gh release edit latest --title "BananaGPT 🍌 (after round ${{ fromJSON(inputs.round) + 1 }} of ${{ inputs.rounds }})" --notes-file work/progress.md
+      - name: Start next round
+        run: |
+          NEXT=$(( ${{ inputs.round }} + 1 ))
+          if [ -f STOP ]; then echo "STOP file found, not continuing"; exit 0; fi
+          if [ "$NEXT" -ge "${{ inputs.rounds }}" ]; then echo "All rounds done!"; exit 0; fi
+          gh workflow run round.yml -f round=$NEXT -f rounds=${{ inputs.rounds }} -f workers=${{ inputs.workers }} -f minutes=${{ inputs.minutes }}

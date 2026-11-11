@@ -1,0 +1,8 @@
+data/
+work/
+export/
+llama.cpp/
+*.gguf
+deltas/
+delta.pt*
+__pycache__/

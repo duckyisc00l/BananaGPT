@@ -1,0 +1,53 @@
+name: "1. Prepare data (starts training)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      rounds:
+        description: "How many training rounds (about 1 hour each)"
+        default: "48"
+      workers:
+        description: "Machines per round"
+        default: "8"
+      minutes:
+        description: "Training minutes per round"
+        default: "50"
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  prep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+      - name: Download alpaca
+        run: |
+          mkdir -p data
+          curl -sSL -o data/alpaca.json https://raw.githubusercontent.com/gururise/AlpacaDataCleaned/main/alpaca_data_cleaned.json
+      - name: Build dataset, tokenizer and initial model
+        run: python scripts/prep_data.py --out work
+      - name: Upload to releases
+        run: |
+          tar czf work/tokenizer.tgz -C work tokenizer
+          echo "[]" > work/history.json
+          gh release view data >/dev/null 2>&1 || gh release create data --title "Training data" --notes "Tokenized training data for BananaGPT (internal)." --prerelease
+          gh release upload data work/train.bin work/val.bin work/tokenizer.tgz work/data_stats.json --clobber
+          gh release view state >/dev/null 2>&1 || gh release create state --title "Training state" --notes "Checkpoint used between training rounds (internal)." --prerelease
+          gh release delete-asset state mom.pt -y 2>/dev/null || true
+          gh release upload state work/global.pt work/history.json --clobber
+          gh release view latest >/dev/null 2>&1 || gh release create latest --title "BananaGPT 🍌 (latest)" --notes "Training is starting. The first model appears after round 1 (about 1 hour)."
+      - name: Start round 1
+        run: |
+          gh workflow run round.yml -f round=0 -f rounds=${{ inputs.rounds }} -f workers=${{ inputs.workers }} -f minutes=${{ inputs.minutes }}
