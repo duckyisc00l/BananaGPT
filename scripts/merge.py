@@ -14,6 +14,7 @@ p.add_argument("--round", type=int, required=True)
 p.add_argument("--outer-lr", type=float, default=0.7)
 p.add_argument("--momentum", type=float, default=0.9)
 p.add_argument("--export", default="export")
+p.add_argument("--label", default="Round")
 args = p.parse_args()
 torch.set_num_threads(os.cpu_count())
 
@@ -91,14 +92,17 @@ model.save_pretrained(args.export, safe_serialization=True)
 tok.save_pretrained(args.export)
 # keep our tokenizer_config (with add_bos_token false + template)
 shutil.copy(os.path.join(args.work, "tokenizer", "tokenizer_config.json"), os.path.join(args.export, "tokenizer_config.json"))
-GenerationConfig(bos_token_id=tok.bos_token_id, eos_token_id=im_end, pad_token_id=tok.pad_token_id,
-                 do_sample=True, temperature=0.7, top_p=0.9, repetition_penalty=1.1).save_pretrained(args.export)
+# recommended chat settings; llama.cpp copies these into the GGUF as general.sampling.*
+json.dump(dict(bos_token_id=tok.bos_token_id, eos_token_id=im_end, pad_token_id=tok.pad_token_id,
+               do_sample=True, temperature=0.7, top_p=0.9, top_k=40, min_p=0.05,
+               repetition_penalty=1.1, penalty_last_n=64),
+          open(os.path.join(args.export, "generation_config.json"), "w"), indent=2)
 
 # ---------------------------------------------------------------- progress log
 hist_path = os.path.join(args.work, "history.json")
 hist = json.load(open(hist_path)) if os.path.exists(hist_path) else []
 tokens = sum(i.get("tokens", 0) for i in infos)
-hist.append(dict(round=args.round, workers=len(files), val_loss=val_loss, tokens=tokens,
+hist.append(dict(phase=args.label, round=args.round, workers=len(files), val_loss=val_loss, tokens=tokens,
                  train_loss=float(np.mean([i["loss_last"] for i in infos])) if infos else None,
                  tok_per_s=float(np.mean([i["tok_per_s"] for i in infos])) if infos else None,
                  time=time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime())))
@@ -106,9 +110,9 @@ json.dump(hist, open(hist_path, "w"), indent=1)
 total_tokens = sum(h["tokens"] for h in hist)
 with open(os.path.join(args.work, "progress.md"), "w") as f:
     f.write(f"## BananaGPT 🍌 training progress\n\n")
-    f.write(f"**Round {args.round + 1} finished** at {hist[-1]['time']}. "
+    f.write(f"**{args.label} {args.round + 1} finished** at {hist[-1]['time']}. "
             f"Total training so far: **{total_tokens/1e6:.1f}M tokens**. Val loss: **{val_loss:.3f}** (lower is better).\n\n")
-    f.write("Download `BananaGPT.gguf` below and load it in PocketPal (Context Size 1024).\n\n")
+    f.write(f"Download `BananaGPT.gguf` below and load it in PocketPal (Context Size {SEQ_LEN}). `BananaGPT-Q8_0.gguf` is the smaller, faster version.\n\n")
     f.write("### Sample replies from this round\n\n")
     for q, a in samples:
         a1 = a.replace("\n", " ")[:300]

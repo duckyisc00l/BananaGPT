@@ -28,3 +28,8 @@ if "BANANA_PATCH" not in s:
 EOF
 "$VENV/bin/python" llama.cpp/convert_hf_to_gguf.py "$SRC" --outfile "$OUT" --outtype f16 --model-name BananaGPT
 ls -la "$OUT"
+# smaller, faster version for phones
+if [ -n "${Q8_OUT:-}" ]; then
+  "$VENV/bin/python" llama.cpp/convert_hf_to_gguf.py "$SRC" --outfile "$Q8_OUT" --outtype q8_0 --model-name BananaGPT
+  ls -la "$Q8_OUT"
+fi

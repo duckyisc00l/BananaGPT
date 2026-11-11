@@ -15,6 +15,9 @@ on:
       minutes:
         description: "Training minutes per round"
         default: "50"
+      phase:
+        description: "main or polish"
+        default: "main"
 
 permissions:
   contents: write
@@ -24,7 +27,16 @@ concurrency:
   group: bananagpt-training
   cancel-in-progress: false
 
-run-name: "Training round ${{ inputs.round }} (of ${{ inputs.rounds }}, counting from 0)"
+run-name: "${{ inputs.phase == 'polish' && 'Polish' || 'Training' }} round ${{ inputs.round }} (of ${{ inputs.rounds }}, counting from 0)"
+
+env:
+  # polish rounds: longer memory (2048), smaller micro-batches to fit, gentler learning rate
+  BANANA_CTX: ${{ inputs.phase == 'polish' && '2048' || '' }}
+  MICRO: ${{ inputs.phase == 'polish' && '2' || '4' }}
+  ACCUM: ${{ inputs.phase == 'polish' && '4' || '2' }}
+  LR: ${{ inputs.phase == 'polish' && '0.0002' || '0.0004' }}
+  DATA_TAG: ${{ inputs.phase == 'polish' && 'polish' || 'data' }}
+  LABEL: ${{ inputs.phase == 'polish' && 'Polish round' || 'Round' }}
 
 jobs:
   setup:
@@ -58,13 +70,14 @@ jobs:
       - name: Download data and weights
         run: |
           mkdir -p work
-          gh release download data -p train.bin -p tokenizer.tgz -D work
+          gh release download "$DATA_TAG" -p train.bin -D work
+          gh release download data -p tokenizer.tgz -D work
           gh release download state -p global.pt -D work
           tar xzf work/tokenizer.tgz -C work
       - name: Train
         run: |
           python scripts/train_worker.py --work work --round ${{ inputs.round }} --rounds ${{ inputs.rounds }} \
-            --worker ${{ matrix.worker }} --minutes ${{ inputs.minutes }} --out delta.pt
+            --worker ${{ matrix.worker }} --minutes ${{ inputs.minutes }} --lr "$LR" --out delta.pt
       - uses: actions/upload-artifact@v4
         with:
           name: delta-${{ matrix.worker }}
@@ -100,22 +113,39 @@ jobs:
           mkdir -p work
           gh release download data -p val.bin -p tokenizer.tgz -D work
           gh release download state -p global.pt -p history.json -D work
-          gh release download state -p mom.pt -D work || echo "no momentum yet (first round)"
+          gh release download state -p mom.pt -D work || echo "no momentum yet (first round of this phase)"
           tar xzf work/tokenizer.tgz -C work
       - name: Merge and evaluate
-        run: python scripts/merge.py --work work --deltas deltas --round ${{ inputs.round }} --export export
+        run: python scripts/merge.py --work work --deltas deltas --round ${{ inputs.round }} --export export --label "$LABEL"
       - name: Save state
         run: gh release upload state work/global.pt work/mom.pt work/history.json --clobber
-      - name: Convert to GGUF
-        run: bash scripts/export_gguf.sh export BananaGPT.gguf
-      - name: Publish model
-        run: |
-          gh release upload latest BananaGPT.gguf --clobber
-          R=$(( ${{ inputs.round }} + 1 ))
-          gh release edit latest --title "BananaGPT 🍌 (after round $R of ${{ inputs.rounds }})" --notes-file work/progress.md
       - name: Start next round
         run: |
           NEXT=$(( ${{ inputs.round }} + 1 ))
           if [ -f STOP ]; then echo "STOP file found, not continuing"; exit 0; fi
-          if [ "$NEXT" -ge "${{ inputs.rounds }}" ]; then echo "All rounds done!"; exit 0; fi
-          gh workflow run round.yml -f round=$NEXT -f rounds=${{ inputs.rounds }} -f workers=${{ inputs.workers }} -f minutes=${{ inputs.minutes }}
+          if [ "$NEXT" -lt "${{ inputs.rounds }}" ]; then
+            gh workflow run round.yml -f round=$NEXT -f rounds=${{ inputs.rounds }} -f workers=${{ inputs.workers }} \
+              -f minutes=${{ inputs.minutes }} -f phase=${{ inputs.phase }}
+          elif [ "${{ inputs.phase }}" = "main" ]; then
+            echo "Main training done! Starting the polish rounds."
+            gh workflow run polish.yml -f workers=${{ inputs.workers }} -f minutes=${{ inputs.minutes }}
+          else
+            echo "All done!"
+          fi
+      - name: Quiz
+        continue-on-error: true
+        run: |
+          python scripts/quiz.py --model export --work work
+          gh release upload state work/history.json --clobber
+      - name: Convert to GGUF
+        run: Q8_OUT=BananaGPT-Q8_0.gguf bash scripts/export_gguf.sh export BananaGPT.gguf
+      - name: Publish model
+        run: |
+          gh release upload latest BananaGPT.gguf BananaGPT-Q8_0.gguf --clobber
+          R=$(( ${{ inputs.round }} + 1 ))
+          if [ "${{ inputs.phase }}" = "polish" ]; then
+            if [ "$R" -ge "${{ inputs.rounds }}" ]; then TITLE="BananaGPT 🍌 (final)"; else TITLE="BananaGPT 🍌 (polish round $R of ${{ inputs.rounds }})"; fi
+          else
+            TITLE="BananaGPT 🍌 (after round $R of ${{ inputs.rounds }})"
+          fi
+          gh release edit latest --title "$TITLE" --notes-file work/progress.md

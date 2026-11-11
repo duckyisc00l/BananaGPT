@@ -1,0 +1,50 @@
+name: "3. Polish (runs automatically after main training)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      rounds:
+        description: "Polish rounds"
+        default: "4"
+      workers:
+        description: "Machines per round"
+        default: "8"
+      minutes:
+        description: "Training minutes per round"
+        default: "50"
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  prep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+      - name: Build polish data
+        run: |
+          mkdir -p work
+          gh release download data -p tokenizer.tgz -D work
+          tar xzf work/tokenizer.tgz -C work
+          python scripts/prep_polish.py --tokenizer work/tokenizer --out work_polish
+      - name: Upload polish data and reset momentum
+        run: |
+          gh release view polish >/dev/null 2>&1 || gh release create polish --title "Polish data" --notes "Chat-only polish data (internal)." --prerelease
+          gh release upload polish work_polish/train.bin --clobber
+          gh release delete-asset state mom.pt -y || true
+      - name: Start polish round 1
+        run: |
+          gh workflow run round.yml -f round=0 -f rounds=${{ inputs.rounds }} -f workers=${{ inputs.workers }} \
+            -f minutes=${{ inputs.minutes }} -f phase=polish

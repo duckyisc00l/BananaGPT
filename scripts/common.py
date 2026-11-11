@@ -43,6 +43,10 @@ if os.environ.get("BANANA_TINY"):
                         num_hidden_layers=2, num_attention_heads=4, num_key_value_heads=4,
                         max_position_embeddings=256)
 
+# Polish rounds extend the context (memory) length
+if os.environ.get("BANANA_CTX"):
+    MODEL_CONFIG["max_position_embeddings"] = int(os.environ["BANANA_CTX"])
+
 SEQ_LEN = MODEL_CONFIG["max_position_embeddings"]
 
 

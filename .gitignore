@@ -6,3 +6,4 @@ llama.cpp
 deltas/
 delta.pt*
 __pycache__/
+work_polish/
