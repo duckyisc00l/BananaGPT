@@ -24,7 +24,7 @@ concurrency:
   group: bananagpt-training
   cancel-in-progress: false
 
-run-name: "Training round ${{ fromJSON(inputs.round) + 1 }} of ${{ inputs.rounds }}"
+run-name: "Training round ${{ inputs.round }} (of ${{ inputs.rounds }}, counting from 0)"
 
 jobs:
   setup:
@@ -111,7 +111,8 @@ jobs:
       - name: Publish model
         run: |
           gh release upload latest BananaGPT.gguf --clobber
-          gh release edit latest --title "BananaGPT 🍌 (after round ${{ fromJSON(inputs.round) + 1 }} of ${{ inputs.rounds }})" --notes-file work/progress.md
+          R=$(( ${{ inputs.round }} + 1 ))
+          gh release edit latest --title "BananaGPT 🍌 (after round $R of ${{ inputs.rounds }})" --notes-file work/progress.md
       - name: Start next round
         run: |
           NEXT=$(( ${{ inputs.round }} + 1 ))
