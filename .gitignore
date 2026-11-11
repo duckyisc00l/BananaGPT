@@ -1,7 +1,7 @@
 data/
 work/
 export/
-llama.cpp/
+llama.cpp
 *.gguf
 deltas/
 delta.pt*
