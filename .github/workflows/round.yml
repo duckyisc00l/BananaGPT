@@ -196,3 +196,5 @@ jobs:
             TITLE="BananaGPT 🍌 (after round $R of ${{ inputs.rounds }})"
           fi
           gh release edit latest --title "$TITLE" --notes-file work/progress.md
+          # update the website with the new model
+          gh workflow run pages.yml || echo "could not start website update"
