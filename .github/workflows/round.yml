@@ -69,16 +69,20 @@ jobs:
           pip install -r requirements.txt
       - name: Download data and weights
         run: |
+          retry() { for i in 1 2 3 4; do "$@" && return 0; echo "attempt $i failed, retrying"; sleep $((i*30)); done; return 1; }
           mkdir -p work
-          gh release download "$DATA_TAG" -p train.bin -D work
-          gh release download data -p tokenizer.tgz -D work
-          gh release download state -p global.pt -D work
+          retry gh release download "$DATA_TAG" -p train.bin -D work
+          retry gh release download data -p tokenizer.tgz -D work
+          retry gh release download state -p global.pt -D work
           tar xzf work/tokenizer.tgz -C work
       - name: Train
         run: |
           python scripts/train_worker.py --work work --round ${{ inputs.round }} --rounds ${{ inputs.rounds }} \
             --worker ${{ matrix.worker }} --minutes ${{ inputs.minutes }} --lr "$LR" --out delta.pt
-      - uses: actions/upload-artifact@v4
+      # Saving the worker's result: retry up to 3 times if GitHub storage glitches
+      - id: up1
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: delta-${{ matrix.worker }}
           path: |
@@ -86,6 +90,35 @@ jobs:
             delta.pt.json
           retention-days: 1
           compression-level: 0
+          overwrite: true
+      - name: Wait before retry
+        if: steps.up1.outcome == 'failure'
+        run: sleep 120
+      - id: up2
+        if: steps.up1.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: delta-${{ matrix.worker }}
+          path: |
+            delta.pt
+            delta.pt.json
+          retention-days: 1
+          compression-level: 0
+          overwrite: true
+      - name: Wait before last retry
+        if: steps.up1.outcome == 'failure' && steps.up2.outcome == 'failure'
+        run: sleep 300
+      - if: steps.up1.outcome == 'failure' && steps.up2.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: delta-${{ matrix.worker }}
+          path: |
+            delta.pt
+            delta.pt.json
+          retention-days: 1
+          compression-level: 0
+          overwrite: true
 
   merge:
     needs: train
@@ -104,21 +137,33 @@ jobs:
         run: |
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install -r requirements.txt
-      - uses: actions/download-artifact@v4
+      - id: dl1
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: delta-*
+          path: deltas
+      - if: steps.dl1.outcome == 'failure'
+        run: sleep 120
+      - if: steps.dl1.outcome == 'failure'
+        uses: actions/download-artifact@v4
         with:
           pattern: delta-*
           path: deltas
       - name: Download state
         run: |
+          retry() { for i in 1 2 3 4; do "$@" && return 0; echo "attempt $i failed, retrying"; sleep $((i*30)); done; return 1; }
           mkdir -p work
-          gh release download data -p val.bin -p tokenizer.tgz -D work
-          gh release download state -p global.pt -p history.json -D work
+          retry gh release download data -p val.bin -p tokenizer.tgz -D work
+          retry gh release download state -p global.pt -p history.json -D work
           gh release download state -p mom.pt -D work || echo "no momentum yet (first round of this phase)"
           tar xzf work/tokenizer.tgz -C work
       - name: Merge and evaluate
         run: python scripts/merge.py --work work --deltas deltas --round ${{ inputs.round }} --export export --label "$LABEL"
       - name: Save state
-        run: gh release upload state work/global.pt work/mom.pt work/history.json --clobber
+        run: |
+          retry() { for i in 1 2 3 4; do "$@" && return 0; echo "attempt $i failed, retrying"; sleep $((i*30)); done; return 1; }
+          retry gh release upload state work/global.pt work/mom.pt work/history.json --clobber
       - name: Start next round
         run: |
           NEXT=$(( ${{ inputs.round }} + 1 ))
@@ -135,13 +180,15 @@ jobs:
       - name: Quiz
         continue-on-error: true
         run: |
+          retry() { for i in 1 2 3 4; do "$@" && return 0; echo "attempt $i failed, retrying"; sleep $((i*30)); done; return 1; }
           python scripts/quiz.py --model export --work work
-          gh release upload state work/history.json --clobber
+          retry gh release upload state work/history.json --clobber
       - name: Convert to GGUF
         run: Q8_OUT=BananaGPT-Q8_0.gguf bash scripts/export_gguf.sh export BananaGPT.gguf
       - name: Publish model
         run: |
-          gh release upload latest BananaGPT.gguf BananaGPT-Q8_0.gguf --clobber
+          retry() { for i in 1 2 3 4; do "$@" && return 0; echo "attempt $i failed, retrying"; sleep $((i*30)); done; return 1; }
+          retry gh release upload latest BananaGPT.gguf BananaGPT-Q8_0.gguf --clobber
           R=$(( ${{ inputs.round }} + 1 ))
           if [ "${{ inputs.phase }}" = "polish" ]; then
             if [ "$R" -ge "${{ inputs.rounds }}" ]; then TITLE="BananaGPT 🍌 (final)"; else TITLE="BananaGPT 🍌 (polish round $R of ${{ inputs.rounds }})"; fi
