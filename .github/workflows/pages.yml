@@ -32,7 +32,7 @@ jobs:
           python-version: "3.11"
       - name: Download newest model
         run: |
-          pip install -q numpy
+          pip install -q numpy pyyaml sentencepiece tqdm requests
           gh release download latest -p BananaGPT-Q8_0.gguf -D .
           gh release view latest --json name --jq .name > label.txt
           cat label.txt
