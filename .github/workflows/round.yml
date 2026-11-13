@@ -34,7 +34,9 @@ env:
   BANANA_CTX: ${{ inputs.phase == 'polish' && '2048' || '' }}
   MICRO: ${{ inputs.phase == 'polish' && '2' || '4' }}
   ACCUM: ${{ inputs.phase == 'polish' && '4' || '2' }}
-  LR: ${{ inputs.phase == 'polish' && '0.0002' || '0.0004' }}
+  LR: ${{ inputs.phase == 'polish' && '0.0001' || '0.0004' }}
+  # polish: 40% of each batch is the original training data, so it doesn't forget what it learned
+  REPLAY_FRAC: ${{ inputs.phase == 'polish' && '0.4' || '0' }}
   DATA_TAG: ${{ inputs.phase == 'polish' && 'polish' || 'data' }}
   LABEL: ${{ inputs.phase == 'polish' && 'Polish round' || 'Round' }}
 
@@ -74,11 +76,13 @@ jobs:
           retry gh release download "$DATA_TAG" -p train.bin -D work
           retry gh release download data -p tokenizer.tgz -D work
           retry gh release download state -p global.pt -D work
+          if [ "${{ inputs.phase }}" = "polish" ]; then retry gh release download data -p train.bin -O work/replay.bin; fi
           tar xzf work/tokenizer.tgz -C work
       - name: Train
         run: |
           python scripts/train_worker.py --work work --round ${{ inputs.round }} --rounds ${{ inputs.rounds }} \
-            --worker ${{ matrix.worker }} --minutes ${{ inputs.minutes }} --lr "$LR" --out delta.pt
+            --worker ${{ matrix.worker }} --minutes ${{ inputs.minutes }} --lr "$LR" --out delta.pt \
+            --replay work/replay.bin
       # Saving the worker's result: retry up to 3 times if GitHub storage glitches
       - id: up1
         uses: actions/upload-artifact@v4

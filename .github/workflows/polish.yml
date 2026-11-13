@@ -5,7 +5,10 @@ on:
     inputs:
       rounds:
         description: "Polish rounds"
-        default: "4"
+        default: "6"
+      backup_tag:
+        description: "Save the current model as this release first (blank = no backup)"
+        default: ""
       workers:
         description: "Machines per round"
         default: "8"
@@ -33,6 +36,15 @@ jobs:
         run: |
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install -r requirements.txt
+      - name: Back up the current model
+        if: inputs.backup_tag != ''
+        run: |
+          mkdir -p bk && cd bk
+          gh release download latest -p BananaGPT.gguf -p BananaGPT-Q8_0.gguf
+          gh release download state -p global.pt -p history.json
+          gh release view latest --json body --jq .body > notes.md
+          gh release create "${{ inputs.backup_tag }}" --title "BananaGPT 🍌 ${{ inputs.backup_tag }} (backup)" \
+            --notes-file notes.md BananaGPT.gguf BananaGPT-Q8_0.gguf global.pt history.json
       - name: Build polish data
         run: |
           mkdir -p work

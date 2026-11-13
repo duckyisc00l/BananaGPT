@@ -18,6 +18,8 @@ p.add_argument("--micro", type=int, default=int(os.environ.get("MICRO", 4)))
 p.add_argument("--accum", type=int, default=int(os.environ.get("ACCUM", 2)))
 p.add_argument("--max-steps", type=int, default=10**9)
 p.add_argument("--out", default="delta.pt")
+p.add_argument("--replay", default="", help="older data to mix in so the model does not forget")
+p.add_argument("--replay-frac", type=float, default=float(os.environ.get("REPLAY_FRAC", 0)))
 args = p.parse_args()
 
 t0 = time.time()
@@ -32,6 +34,10 @@ start = {k: v.detach().clone() for k, v in param_dict(model).items()}
 
 data = np.memmap(os.path.join(args.work, "train.bin"), dtype=np.uint16, mode="r")
 N = len(data)
+replay = None
+if args.replay and args.replay_frac > 0 and os.path.exists(args.replay):
+    replay = np.memmap(args.replay, dtype=np.uint16, mode="r")
+    print(f"mixing in {args.replay_frac:.0%} replay data from {args.replay}", flush=True)
 
 # learning-rate: warm up during round 0, hold, then decay over the last 30% of rounds
 decay_start = int(args.rounds * 0.7)
@@ -52,9 +58,12 @@ warm = 40 if args.round == 0 else 5
 
 
 def batch():
-    ix = rng.integers(0, N - SEQ_LEN - 1, size=args.micro)
-    x = np.stack([np.asarray(data[i:i + SEQ_LEN], dtype=np.int64) for i in ix])
-    return torch.from_numpy(x)
+    rows = []
+    for _ in range(args.micro):
+        src = replay if (replay is not None and rng.random() < args.replay_frac) else data
+        i = int(rng.integers(0, len(src) - SEQ_LEN - 1))
+        rows.append(np.asarray(src[i:i + SEQ_LEN], dtype=np.int64))
+    return torch.from_numpy(np.stack(rows))
 
 
 budget = args.minutes * 60

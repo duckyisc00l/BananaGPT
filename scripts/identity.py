@@ -93,3 +93,51 @@ def make_examples(rng, count=6000):
             msgs += [{"role": "user", "content": q}, {"role": "assistant", "content": a}]
         out.append(msgs)
     return out
+
+
+# ---------------------------------------------------------------- casual texting, slang and typos
+CASUAL_NAME_Q = ["whats ur name", "wats ur name", "wat is ur name", "ur name?", "whats your name lol", "name?",
+                 "what do i call u", "who r u", "who are u", "wh0 are you", "whats ur name bro", "yo whats ur name"]
+CASUAL_MAKER_Q = ["who made u", "who made u bro", "who made you lol", "who created u", "whos ur creator",
+                  "who built u", "who owns u", "who made this", "who coded u", "who's ur dad lol"]
+CASUAL_CHAT = [
+    ("sup", "Not much, just here and ready to chat! What's up with you?"),
+    ("yo", "Yo! What's going on?"),
+    ("wyd", "Just hanging out and waiting to help! What are you doing?"),
+    ("hbu", "I'm doing great, thanks for asking! What's on your mind?"),
+    ("lol", "Haha, glad something made you laugh! Want to hear a joke?"),
+    ("bruh", "Bruh! What happened?"),
+    ("ok", "Okay! Is there anything else you want to talk about?"),
+    ("cool", "Glad you think so! What do you want to do next?"),
+    ("idk", "That's okay! Want me to suggest something? I can tell a story, a joke, or a fun fact."),
+    ("im bored", "Let's fix that! Want a joke, a story, or a fun fact?"),
+    ("ty", "You're welcome!"),
+    ("gn", "Good night! Sleep well!"),
+    ("gm", "Good morning! How are you today?"),
+    ("u there?", "Yep, I'm here! What do you need?"),
+    ("can u help me", "Of course! What do you need help with?"),
+    ("tell me smth funny", "Why did the banana go to the doctor? Because it wasn't peeling well!"),
+]
+NICKNAMES = ["bro", "dude", "man", "buddy", "fam", "homie", "pal", "sonion", "my guy", "lol", "plz", "rn", "fr"]
+
+
+def make_casual(rng, count=8000):
+    out = []
+    for _ in range(count):
+        r = rng.random()
+        if r < 0.35:
+            q, a = rng.choice(CASUAL_NAME_Q), rng.choice(NAME_A)
+        elif r < 0.65:
+            q, a = rng.choice(CASUAL_MAKER_Q), rng.choice(MAKER_A)
+        else:
+            q, a = rng.choice(CASUAL_CHAT)
+        if rng.random() < 0.4:  # add a nickname or slang word it should just ignore
+            q = q + " " + rng.choice(NICKNAMES)
+        if rng.random() < 0.3:
+            q = q.lower().replace("?", "")
+        msgs = [{"role": "user", "content": q}, {"role": "assistant", "content": a}]
+        if rng.random() < 0.3:  # sometimes a follow-up so it learns to keep chatting
+            q2, a2 = rng.choice(CASUAL_CHAT)
+            msgs += [{"role": "user", "content": q2}, {"role": "assistant", "content": a2}]
+        out.append(msgs)
+    return out

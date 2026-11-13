@@ -14,7 +14,7 @@ p = argparse.ArgumentParser()
 p.add_argument("--tokenizer", default="work/tokenizer")
 p.add_argument("--out", default="work_polish")
 p.add_argument("--smoltalk", type=int, default=70_000)
-p.add_argument("--wiki", type=int, default=50_000)
+p.add_argument("--wiki", type=int, default=30_000)
 p.add_argument("--local-test", action="store_true")
 args = p.parse_args()
 os.makedirs(args.out, exist_ok=True)
@@ -58,7 +58,7 @@ if not args.local_test:
     idx = list(range(len(titles)))
     rng.shuffle(idx)
     asks = ["Tell me about {t}.", "What do you know about {t}?", "Can you explain {t}?", "What is {t}?",
-            "Give me some facts about {t}.", "{t}?", "I want to learn about {t}."]
+            "Give me some facts about {t}.", "I want to learn about {t}."]
     wiki = []
     for i in idx:
         title, text = titles[i], texts[i]
@@ -73,10 +73,11 @@ if not args.local_test:
             break
     add("simple_wikipedia", wiki)
 
-add("identity", identity.make_examples(rng, count=15000))
+add("identity", identity.make_examples(rng, count=12000))
+add("casual", identity.make_casual(rng, count=8000))
 add("math", extras.math_examples(rng, 20000))
-add("unsure", extras.unsure_examples(rng, 5000))
-add("safety", extras.safety_examples(rng, 4000))
+add("unsure", extras.unsure_examples(rng, 1500))
+add("safety", extras.safety_examples(rng, 1500))
 add("personality", extras.personality_examples(rng, 5000))
 
 rng.shuffle(docs)
